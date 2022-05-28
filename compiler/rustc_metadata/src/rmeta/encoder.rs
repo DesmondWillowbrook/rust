@@ -402,6 +402,7 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
         assert_eq!(self.lazy_state, LazyState::NoNode);
         self.lazy_state = LazyState::NodeStart(pos);
         value.borrow().encode(self).unwrap();
+        self.opaque.data[pos..].hash_stable(&mut self.hashing_context, &mut self.hasher);
         self.lazy_state = LazyState::NoNode;
 
         assert!(pos.get() <= self.position());
@@ -421,6 +422,7 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
         assert_eq!(self.lazy_state, LazyState::NoNode);
         self.lazy_state = LazyState::NodeStart(pos);
         let len = values.into_iter().map(|value| value.borrow().encode(self).unwrap()).count();
+        self.opaque.data[pos..].hash_stable(&mut self.hashing_context, &mut self.hasher);
         self.lazy_state = LazyState::NoNode;
 
         assert!(pos.get() <= self.position());
