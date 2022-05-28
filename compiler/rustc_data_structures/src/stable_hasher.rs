@@ -524,6 +524,18 @@ where
     }
 }
 
+impl<const N: usize, T, CTX> HashStable<CTX> for [T; N]
+where
+    T: HashStable<CTX>,
+{
+    fn hash_stable(&self, ctx: &mut CTX, hasher: &mut StableHasher) {
+        self.len().hash_stable(ctx, hasher);
+        for v in self {
+            v.hash_stable(ctx, hasher);
+        }
+    }
+}
+
 impl<I: vec::Idx, CTX> HashStable<CTX> for bit_set::BitSet<I> {
     fn hash_stable(&self, _ctx: &mut CTX, hasher: &mut StableHasher) {
         ::std::hash::Hash::hash(self, hasher);
