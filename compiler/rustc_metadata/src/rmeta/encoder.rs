@@ -27,6 +27,7 @@ use rustc_middle::ty::codec::TyEncoder;
 use rustc_middle::ty::fast_reject::{self, SimplifiedType, TreatParams};
 use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::{self, SymbolName, Ty, TyCtxt};
+use rustc_query_system::ich::StableHashingContext;
 use rustc_serialize::{opaque, Encodable, Encoder};
 use rustc_session::config::CrateType;
 use rustc_session::cstore::{ForeignModule, LinkagePreference, NativeLib};
@@ -71,6 +72,8 @@ pub(super) struct EncodeContext<'a, 'tcx> {
     required_source_files: Option<GrowableBitSet<usize>>,
     is_proc_macro: bool,
     hygiene_ctxt: &'a HygieneEncodeContext,
+    hasher: StableHasher,
+    hashing_context: StableHashingContext<'a>,
 }
 
 /// If the current crate is a proc-macro, returns early with `Lazy:empty()`.
@@ -2225,6 +2228,8 @@ fn encode_metadata_impl(tcx: TyCtxt<'_>) -> EncodedMetadata {
         required_source_files,
         is_proc_macro: tcx.sess.crate_types().contains(&CrateType::ProcMacro),
         hygiene_ctxt: &hygiene_ctxt,
+        hasher: StableHasher::new(),
+        hashing_context: tcx.create_stable_hashing_context()
     };
 
     // Encode the rustc version string in a predictable location.
