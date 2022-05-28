@@ -1,6 +1,9 @@
 use crate::rmeta::*;
 
-use rustc_data_structures::fingerprint::Fingerprint;
+use rustc_data_structures::{
+    fingerprint::Fingerprint,
+    stable_hasher::{HashStable, StableHasher},
+};
 use rustc_hir::def::{CtorKind, CtorOf};
 use rustc_index::vec::Idx;
 use rustc_middle::ty::ParameterizedOverTcx;
@@ -253,6 +256,16 @@ where
 {
     blocks: IndexVec<I, <Option<T> as FixedSizeEncoding>::ByteArray>,
     _marker: PhantomData<T>,
+}
+
+impl<I: Idx, T, CTX> HashStable<CTX> for TableBuilder<I, T>
+where
+    Option<T>: FixedSizeEncoding,
+    <Option<T> as FixedSizeEncoding>::ByteArray: HashStable<CTX>,
+{
+    fn hash_stable(&self, hcx: &mut CTX, hasher: &mut StableHasher) {
+        self.blocks.hash_stable(hcx, hasher);
+    }
 }
 
 impl<I: Idx, T> Default for TableBuilder<I, T>

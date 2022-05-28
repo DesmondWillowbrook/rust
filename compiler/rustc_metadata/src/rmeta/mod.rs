@@ -13,6 +13,7 @@ use rustc_hir::def_id::{CrateNum, DefId, DefIndex, DefPathHash, StableCrateId};
 use rustc_hir::definitions::DefKey;
 use rustc_hir::lang_items;
 use rustc_index::{bit_set::FiniteBitSet, vec::IndexVec};
+use rustc_macros::{HashStable, MetadataDecodable, MetadataEncodable};
 use rustc_middle::metadata::ModChild;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrs;
 use rustc_middle::middle::exported_symbols::{ExportedSymbol, SymbolExportInfo};
@@ -317,7 +318,7 @@ macro_rules! define_tables {
             $($name: LazyTable<$IDX, $T>),+
         }
 
-        #[derive(Default)]
+        #[derive(Default, HashStable)]
         struct TableBuilders {
             $($name: TableBuilder<$IDX, $T>),+
         }
