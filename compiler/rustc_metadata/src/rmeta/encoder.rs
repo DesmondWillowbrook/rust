@@ -90,6 +90,8 @@ macro_rules! empty_proc_macro {
 macro_rules! encoder_methods {
     ($($name:ident($ty:ty);)*) => {
         $(fn $name(&mut self, value: $ty) -> Result<(), Self::Error> {
+            // intercept encoding stream to hash bytes as well.
+            value.hash_stable(&mut self.hashing_context, &mut self.hasher);
             self.opaque.$name(value)
         })*
     }
@@ -402,7 +404,6 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
         assert_eq!(self.lazy_state, LazyState::NoNode);
         self.lazy_state = LazyState::NodeStart(pos);
         value.borrow().encode(self).unwrap();
-        self.opaque.data[pos..].hash_stable(&mut self.hashing_context, &mut self.hasher);
         self.lazy_state = LazyState::NoNode;
 
         assert!(pos.get() <= self.position());
@@ -422,7 +423,6 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
         assert_eq!(self.lazy_state, LazyState::NoNode);
         self.lazy_state = LazyState::NodeStart(pos);
         let len = values.into_iter().map(|value| value.borrow().encode(self).unwrap()).count();
-        self.opaque.data[pos..].hash_stable(&mut self.hashing_context, &mut self.hasher);
         self.lazy_state = LazyState::NoNode;
 
         assert!(pos.get() <= self.position());
@@ -2166,13 +2166,14 @@ fn prefetch_mir(tcx: TyCtxt<'_>) {
 
 #[derive(Encodable, Decodable)]
 pub struct EncodedMetadata {
+    hash: Fingerprint,
     raw_data: Vec<u8>,
 }
 
 impl EncodedMetadata {
     #[inline]
     pub fn new() -> EncodedMetadata {
-        EncodedMetadata { raw_data: Vec::new() }
+        EncodedMetadata { raw_data: Vec::new(), hash: Fingerprint::new(0, 0) }
     }
 
     #[inline]
@@ -2186,7 +2187,6 @@ pub fn encode_metadata(tcx: TyCtxt<'_>) -> EncodedMetadata {
 
     // Since encoding metadata is not in a query, and nothing is cached,
     // there's no need to do dep-graph tracking for any of it.
-    tcx.dep_graph.assert_ignored();
 
     join(
         || encode_metadata_impl(tcx),
@@ -2231,11 +2231,12 @@ fn encode_metadata_impl(tcx: TyCtxt<'_>) -> EncodedMetadata {
         is_proc_macro: tcx.sess.crate_types().contains(&CrateType::ProcMacro),
         hygiene_ctxt: &hygiene_ctxt,
         hasher: StableHasher::new(),
-        hashing_context: tcx.create_stable_hashing_context()
+        hashing_context: tcx.create_stable_hashing_context(),
     };
 
     // Encode the rustc version string in a predictable location.
     rustc_version().encode(&mut ecx).unwrap();
+    rustc_version().hash_stable(&mut ecx.hashing_context, &mut ecx.hasher);
 
     // Encode all the entries and extra information in the crate,
     // culminating in the `CrateRoot` which points to all of it.
@@ -2254,7 +2255,7 @@ fn encode_metadata_impl(tcx: TyCtxt<'_>) -> EncodedMetadata {
     // Record metadata size for self-profiling
     tcx.prof.artifact_size("crate_metadata", "crate_metadata", result.len() as u64);
 
-    EncodedMetadata { raw_data: result }
+    EncodedMetadata { raw_data: result, hash: ecx.hasher.finish() }
 }
 
 pub fn provide(providers: &mut Providers) {
