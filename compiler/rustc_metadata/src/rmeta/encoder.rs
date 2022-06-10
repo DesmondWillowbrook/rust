@@ -2274,6 +2274,7 @@ pub fn provide(providers: &mut Providers) {
             traits.sort_by_cached_key(|&def_id| tcx.def_path_hash(def_id));
             tcx.arena.alloc_slice(&traits)
         },
+        crate_hash,
 
         ..*providers
     };

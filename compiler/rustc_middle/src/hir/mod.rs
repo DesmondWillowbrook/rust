@@ -87,7 +87,6 @@ pub fn provide(providers: &mut Providers) {
     };
     providers.hir_crate = |tcx, ()| tcx.untracked_crate;
     providers.hir_crate_items = map::hir_crate_items;
-    providers.crate_hash = map::crate_hash;
     providers.hir_module_items = map::hir_module_items;
     providers.hir_owner = |tcx, id| {
         let owner = tcx.hir_crate(()).owners.get(id)?.as_owner()?;
