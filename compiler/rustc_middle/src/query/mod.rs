@@ -1516,7 +1516,7 @@ rustc_queries! {
     // Changing the name should cause a compiler error, but in case that changes, be aware.
     query crate_hash(_: CrateNum) -> Svh {
         eval_always
-        desc { "looking up the hash a crate" }
+        desc { "looking up the hash of crate" }
         separate_provide_extern
     }
     query crate_host_hash(_: CrateNum) -> Option<Svh> {
