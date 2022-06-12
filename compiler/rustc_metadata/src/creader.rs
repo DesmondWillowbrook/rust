@@ -1,7 +1,7 @@
 //! Validates all used crates and extern libraries and loads their metadata
 
 use crate::locator::{CrateError, CrateLocator, CratePaths};
-use crate::rmeta::{CrateDep, CrateMetadata, CrateNumMap, CrateRoot, MetadataBlob};
+use crate::rmeta::{CrateDep, CrateMetadata, CrateNumMap, CrateRoot, MetadataBlob, SuperCrateRoot};
 
 use rustc_ast::expand::allocator::AllocatorKind;
 use rustc_ast::{self as ast, *};
@@ -323,17 +323,19 @@ impl<'a> CrateLoader<'a> {
         None
     }
 
-    fn verify_no_symbol_conflicts(&self, root: &CrateRoot) -> Result<(), CrateError> {
+    fn verify_no_symbol_conflicts(&self, root: &SuperCrateRoot) -> Result<(), CrateError> {
         // Check for (potential) conflicts with the local crate
-        if self.sess.local_stable_crate_id() == root.stable_crate_id() {
-            return Err(CrateError::SymbolConflictsCurrent(root.name()));
+        if self.sess.local_stable_crate_id() == root.inner.stable_crate_id() {
+            return Err(CrateError::SymbolConflictsCurrent(root.inner.name()));
         }
 
         // Check for conflicts with any crate loaded so far
         for (_, other) in self.cstore.iter_crate_data() {
             // Same stable crate id but different SVH
-            if other.stable_crate_id() == root.stable_crate_id() && other.hash() != root.hash() {
-                return Err(CrateError::SymbolConflictsOthers(root.name()));
+            if other.stable_crate_id() == root.inner.stable_crate_id()
+                && other.hash() != root.hash()
+            {
+                return Err(CrateError::SymbolConflictsOthers(root.inner.name()));
             }
         }
 
@@ -376,7 +378,7 @@ impl<'a> CrateLoader<'a> {
 
         info!(
             "register crate `{}` (cnum = {}. private_dep = {})",
-            crate_root.name(),
+            crate_root.inner.name(),
             cnum,
             private_dep
         );
@@ -387,13 +389,14 @@ impl<'a> CrateLoader<'a> {
         let root = if let Some(root) = root {
             root
         } else {
-            crate_paths = CratePaths::new(crate_root.name(), source.clone());
+            crate_paths = CratePaths::new(crate_root.inner.name(), source.clone());
             &crate_paths
         };
 
-        let cnum_map = self.resolve_crate_deps(root, &crate_root, &metadata, cnum, dep_kind)?;
+        let cnum_map =
+            self.resolve_crate_deps(root, &crate_root.inner, &metadata, cnum, dep_kind)?;
 
-        let raw_proc_macros = if crate_root.is_proc_macro_crate() {
+        let raw_proc_macros = if crate_root.inner.is_proc_macro_crate() {
             let temp_root;
             let (dlsym_source, dlsym_root) = match &host_lib {
                 Some(host_lib) => (&host_lib.source, {
@@ -403,7 +406,7 @@ impl<'a> CrateLoader<'a> {
                 None => (&source, &crate_root),
             };
             let dlsym_dylib = dlsym_source.dylib.as_ref().expect("no dylib for a proc-macro crate");
-            Some(self.dlsym_proc_macros(&dlsym_dylib.0, dlsym_root.stable_crate_id())?)
+            Some(self.dlsym_proc_macros(&dlsym_dylib.0, dlsym_root.inner.stable_crate_id())?)
         } else {
             None
         };
@@ -414,13 +417,13 @@ impl<'a> CrateLoader<'a> {
         // and dependency resolution and the verification code would produce
         // ICEs in that case (see #83045).
         self.verify_no_symbol_conflicts(&crate_root)?;
-        self.verify_no_stable_crate_id_hash_conflicts(&crate_root, cnum)?;
+        self.verify_no_stable_crate_id_hash_conflicts(&crate_root.inner, cnum)?;
 
         let crate_metadata = CrateMetadata::new(
             self.sess,
             &self.cstore,
             metadata,
-            crate_root,
+            crate_root.inner,
             raw_proc_macros,
             cnum,
             cnum_map,
@@ -428,6 +431,7 @@ impl<'a> CrateLoader<'a> {
             source,
             private_dep,
             host_hash,
+            crate_root.hash(),
         );
 
         self.cstore.set_crate_data(cnum, crate_metadata);
@@ -595,7 +599,7 @@ impl<'a> CrateLoader<'a> {
         Ok(Some(if can_reuse_cratenum {
             let mut result = LoadResult::Loaded(library);
             for (cnum, data) in self.cstore.iter_crate_data() {
-                if data.name() == root.name() && root.hash() == data.hash() {
+                if data.name() == root.inner.name() && root.hash() == data.hash() {
                     assert!(locator.hash.is_none());
                     info!("load success, going to previous cnum: {}", cnum);
                     result = LoadResult::Previous(cnum);
