@@ -40,7 +40,6 @@ use rustc_target::abi::VariantIdx;
 use std::borrow::Borrow;
 use std::hash::Hash;
 use std::iter;
-use std::mem::take;
 use std::num::NonZeroUsize;
 use tracing::{debug, trace};
 
@@ -73,7 +72,7 @@ pub(super) struct EncodeContext<'a, 'tcx> {
     required_source_files: Option<GrowableBitSet<usize>>,
     is_proc_macro: bool,
     hygiene_ctxt: &'a HygieneEncodeContext,
-    hasher: Option<StableHasher>,
+    hasher: StableHasher,
     hashing_context: StableHashingContext<'a>,
 }
 
@@ -92,10 +91,7 @@ macro_rules! encoder_methods {
     ($($name:ident($ty:ty);)*) => {
         $(fn $name(&mut self, value: $ty) -> Result<(), Self::Error> {
             // intercept encoding stream to hash bytes as well.
-            if let Some(hasher) = self.hasher.as_mut() {
-                value.hash_stable(&mut self.hashing_context, self.hasher.as_mut().unwrap());
-            }
-
+            value.hash_stable(&mut self.hashing_context, &mut self.hasher);
             self.opaque.$name(value)
         })*
     }
@@ -545,7 +541,7 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
         self.lazy_array(adapted.iter().map(|rc| &**rc))
     }
 
-    fn encode_crate_root(mut self) -> (Vec<u8>, LazyValue<CrateRoot>, Svh) {
+    fn encode_crate_root(&mut self) -> LazyValue<CrateRoot> {
         let tcx = self.tcx;
         let mut i = 0;
         let preamble_bytes = self.position() - i;
@@ -629,7 +625,7 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
                     let id = self.interpret_allocs[idx];
                     let pos = self.position() as u32;
                     interpret_alloc_index.push(pos);
-                    interpret::specialized_encode_alloc_id(&mut self, tcx, id).unwrap();
+                    interpret::specialized_encode_alloc_id(self, tcx, id).unwrap();
                 }
                 n = new_n;
             }
@@ -683,14 +679,11 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
         i = self.position();
         let attrs = tcx.hir().krate_attrs();
         let has_default_lib_allocator = tcx.sess.contains_name(&attrs, sym::default_lib_allocator);
-
-        let hasher = take(&mut self.hasher).unwrap();
-        let hash = Svh::new(hasher.finish::<Fingerprint>().to_smaller_hash());
-
         let root = self.lazy(CrateRoot {
             name: tcx.crate_name(LOCAL_CRATE),
             extra_filename: tcx.sess.opts.cg.extra_filename.clone(),
             triple: tcx.sess.opts.target_triple.clone(),
+            hash: tcx.crate_hash(LOCAL_CRATE),
             stable_crate_id: tcx.def_path_hash(LOCAL_CRATE.as_def_id()).stable_crate_id(),
             panic_strategy: tcx.sess.panic_strategy(),
             panic_in_drop_strategy: tcx.sess.opts.debugging_opts.panic_in_drop,
@@ -801,7 +794,7 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
             eprintln!("");
         }
 
-        (self.opaque.into_inner(), root, hash)
+        root
     }
 }
 
@@ -2173,14 +2166,14 @@ fn prefetch_mir(tcx: TyCtxt<'_>) {
 
 #[derive(Encodable, Decodable)]
 pub struct EncodedMetadata {
-    hash: Svh,
+    hash: Fingerprint,
     raw_data: Vec<u8>,
 }
 
 impl EncodedMetadata {
     #[inline]
     pub fn new() -> EncodedMetadata {
-        EncodedMetadata { raw_data: Vec::new(), hash: Svh::new(0) }
+        EncodedMetadata { raw_data: Vec::new(), hash: Fingerprint::new(0, 0) }
     }
 
     #[inline]
@@ -2237,17 +2230,19 @@ fn encode_metadata_impl(tcx: TyCtxt<'_>) -> EncodedMetadata {
         required_source_files,
         is_proc_macro: tcx.sess.crate_types().contains(&CrateType::ProcMacro),
         hygiene_ctxt: &hygiene_ctxt,
-        hasher: Some(StableHasher::new()),
+        hasher: StableHasher::new(),
         hashing_context: tcx.create_stable_hashing_context(),
     };
 
     // Encode the rustc version string in a predictable location.
     rustc_version().encode(&mut ecx).unwrap();
-    rustc_version().hash_stable(&mut ecx.hashing_context, ecx.hasher.as_mut().unwrap());
+    rustc_version().hash_stable(&mut ecx.hashing_context, &mut ecx.hasher);
 
     // Encode all the entries and extra information in the crate,
     // culminating in the `CrateRoot` which points to all of it.
-    let (mut result, root, hash) = ecx.encode_crate_root();
+    let root = ecx.encode_crate_root();
+
+    let mut result = ecx.opaque.into_inner();
 
     // Encode the root position.
     let header = METADATA_HEADER.len();
@@ -2260,12 +2255,7 @@ fn encode_metadata_impl(tcx: TyCtxt<'_>) -> EncodedMetadata {
     // Record metadata size for self-profiling
     tcx.prof.artifact_size("crate_metadata", "crate_metadata", result.len() as u64);
 
-    EncodedMetadata { raw_data: result, hash }
-}
-
-pub(super) fn crate_hash(tcx: TyCtxt<'_>, crate_num: CrateNum) -> Svh {
-    debug_assert_eq!(crate_num, LOCAL_CRATE);
-    encode_metadata(tcx).hash
+    EncodedMetadata { raw_data: result, hash: ecx.hasher.finish() }
 }
 
 pub fn provide(providers: &mut Providers) {

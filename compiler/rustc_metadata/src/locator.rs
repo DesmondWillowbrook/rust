@@ -638,7 +638,7 @@ impl<'a> CrateLocator<'a> {
             return None;
         }
 
-        let root = metadata.get_root().inner;
+        let root = metadata.get_root();
         if root.is_proc_macro_crate() != self.is_proc_macro {
             info!(
                 "Rejecting via proc macro: expected {} got {}",
@@ -662,7 +662,7 @@ impl<'a> CrateLocator<'a> {
             return None;
         }
 
-        let hash = metadata.get_root().hash();
+        let hash = root.hash();
         if let Some(expected_hash) = self.hash {
             if hash != expected_hash {
                 info!("Rejecting via hash: expected {} got {}", expected_hash, hash);
@@ -982,7 +982,7 @@ impl CrateError {
                 let candidates = libraries
                     .iter()
                     .map(|lib| {
-                        let crate_name = lib.metadata.get_root().inner.name();
+                        let crate_name = lib.metadata.get_root().name();
                         let crate_name = crate_name.as_str();
                         let mut paths = lib.source.paths();
 
